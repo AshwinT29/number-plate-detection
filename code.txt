@@ -1,0 +1,73 @@
+# Enable inline display for Jupyter/Colab
+%matplotlib inline
+
+import cv2
+import easyocr
+import numpy as np
+import matplotlib.pyplot as plt
+import re
+from IPython.display import Image, display
+import os
+
+# Path to the input image
+IMAGE_PATH = '/content/Screenshot_11-5-2025_12107_.jpeg'
+
+# Load the image
+image = cv2.imread(IMAGE_PATH)
+if image is None:
+    raise FileNotFoundError(f"Image not found at path: {IMAGE_PATH}")
+
+# Convert to RGB for display
+image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+# Convert to grayscale
+gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+# Apply Gaussian blur
+blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
+
+# Edge detection
+edges = cv2.Canny(blurred, threshold1=100, threshold2=200)
+
+# Find contours
+contours, _ = cv2.findContours(edges.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
+
+# Detect rectangular region for number plate
+plate_img = None
+plate_coords = None
+
+for cnt in contours:
+    approx = cv2.approxPolyDP(cnt, 0.03 * cv2.arcLength(cnt, True), True)
+    if len(approx) == 4:
+        x, y, w, h = cv2.boundingRect(approx)
+        plate_img = image[y:y + h, x:x + w]
+        plate_coords = (x, y, w, h)
+        break
+
+# Initialize EasyOCR
+reader = easyocr.Reader(['en'], gpu=False)
+
+# OCR
+results = []
+if plate_img is not None:
+    results = reader.readtext(plate_img)
+else:
+    results = reader.readtext(image)
+
+# Regex pattern for number plates
+plate_pattern = re.compile(r'^[A-Z0-9-]{5,10}$', re.I)
+
+# Draw results
+image_with_boxes = image.copy()
+for (bbox, text, prob) in results:
+    if prob > 0.5 and plate_pattern.match(text):
+        (top_left, top_right, bottom_right, bottom_left) = bbox
+        top_left = tuple(map(int, top_left))
+        bottom_right = tuple(map(int, bottom_right))
+        cv2.rectangle(image_with_boxes, top_left, bottom_right, (0, 255, 0), 2)
+        cv2.putText(image_with_boxes, text, (top_left[0], top_left[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+
+# Convert for display
+image_with_boxes_rgb = cv2.cvtColor(image_with_boxes, cv2.COLOR_BGR2RGB)
